@@ -11,6 +11,8 @@
 #include <ios>
 #include <sstream>
 
+#define UART_RELAY
+
 #define MEMORY_SIZE (128 * 1024 * 1024)
 #define MMIO_START 0x7e000000
 #define MMIO_LENGTH 0x01000000

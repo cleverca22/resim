@@ -45,12 +45,12 @@ enum BinaryOp {
 	OP_CLZ,
 	OP_LSL,
 	OP_BREV,
-	OP_ASR,
-	OP_ABS,
+	OP_ASR, // 30
+	OP_ABS, // 31
 	OP_MULHD_SS,
 	OP_MULHD_SU,
 	OP_MULHD_US,
-	OP_MULHD_UU,
+	OP_MULHD_UU, // 35
 	OP_DIV_SS,
 	OP_DIV_SU,
 	OP_DIV_US,
@@ -680,6 +680,13 @@ private:
 					registers.setRegister(rd, (a >> b) || (0xffffffff << (32 - b)));
 				}
 				break;
+                        case OP_ABS: // 31
+                                registers.setRegister(rd, labs(a));
+                                break;
+                        case OP_MULHD_UU: // 35
+				registers.setRegister(rd, ((uint64_t)a * (uint64_t)b) >> 32);
+				//throw std::runtime_error("3Unimplemented operation.");
+                                break;
 			case OP_ADDSCALE_5:
 				registers.setRegister(rd, a + (b << 5));
 				break;
@@ -716,9 +723,6 @@ private:
 			case OP_SUBSCALE_8:
 				registers.setRegister(rd, a - (b << 8));
 				break;
-                        case OP_ABS: // 31
-                                registers.setRegister(rd, labs(a));
-                                break;
 			default:
 				throw std::runtime_error("2Unimplemented operation.");
 		}
