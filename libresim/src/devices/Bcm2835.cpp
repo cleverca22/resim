@@ -16,7 +16,7 @@
 /*#define BOOTROM_START 0x60000000
 #define BOOTROM_LENGTH 0x00010000*/
 #define SRAM_START 0x60000000
-#define SRAM_LENGTH 0x00010000
+#define SRAM_LENGTH 0x00020000
 
 #include <iostream>
 
@@ -245,7 +245,7 @@ Bcm2835::~Bcm2835() {
 }
 
 void Bcm2835::initialize(Log *log, Memory *memory) {
-	uartRelay = new UartRelay("192.168.0.100");
+	uartRelay = new UartRelay("127.0.0.1");
 
 	if (data == NULL) {
 		data = new uint8_t[MEMORY_SIZE];

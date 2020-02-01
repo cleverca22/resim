@@ -5,6 +5,8 @@
 
 #include <cassert>
 
+Analyzer analyzer;
+
 class RegisterVideoCoreIVProcessor {
 public:
 	RegisterVideoCoreIVProcessor() {
@@ -37,7 +39,7 @@ const std::vector<std::string> &VideoCoreIVProcessor::getRegisterList() {
 	return registers.getRegisterNames();
 }
 void VideoCoreIVProcessor::run(unsigned int steps) {
-	VideoCoreIVDecode decode(getMemory(), registers, getLog());
+	VideoCoreIVDecode decode(getMemory(), registers, vector_file, getLog());
 	for (unsigned int i = 0; i < steps; i++) {
 		decode.step();
 	}

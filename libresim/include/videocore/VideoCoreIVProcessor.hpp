@@ -25,6 +25,13 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "../Processor.hpp"
 #include "VideoCoreIVRegisterFile.hpp"
 
+class VectorFile {
+public:
+  uint8_t vectorFile[64][64];
+  void write32(uint8_t row, uint8_t col, uint32_t value);
+  uint32_t read32(uint8_t row, uint8_t col);
+};
+
 class VideoCoreIVProcessor : public Processor {
 public:
 	VideoCoreIVProcessor();
@@ -44,6 +51,7 @@ public:
 	}
 private:
 	VideoCoreIVRegisterFile registers;
+        VectorFile vector_file;
 };
 
 #endif
