@@ -9,6 +9,8 @@
 #include <stdexcept>
 #include <cassert>
 #include <math.h>
+#include <set>
+#include <string.h>
 
 static const uint32_t VIDEOCORE4_CPUID = 0x04000104;
 
@@ -33,12 +35,12 @@ enum BinaryOp {
 	OP_MIN,
 	OP_BCLR,
 	OP_ADDS2,
-	OP_BCHG,
+	OP_BITFLIP, // 20
 	OP_ADDS4,
 	OP_ADDS8,
 	OP_ADDS16,
 	OP_EXTS,
-	OP_NEG,
+	OP_NEG, // 25
 	OP_LSR,
 	OP_CLZ,
 	OP_LSL,
@@ -143,6 +145,62 @@ union floatbits {
   uint32_t u;
 };
 
+const char *funcToName(uint32_t addr) {
+  static char buffer[10];
+  switch (addr) {
+  case 0x60000ef2: return "delay_thing2";
+  case 0x60000166: return "thing4";
+  case 0x6000023c: return "bzero_l2_cache";
+  case 0x600003e8: return "delay_thing";
+  case 0x600026f8: return "thing1";
+  case 0x60002cc0: return "otp_thing";
+  case 0x60003456: return "busy_delay";
+  default:
+    snprintf(buffer, 10, "%08x", addr);
+    return buffer;
+  }
+}
+
+class Analyzer {
+public:
+  Analyzer() {
+    FILE *fd = fopen("entry-points.txt", "r");
+    while (!feof(fd)) {
+      uint32_t addr;
+      int i = fscanf(fd, "%x\n", &addr);
+      entrypoints.insert(addr);
+    }
+    fclose(fd);
+    this->fd = fopen("entry-points.txt", "w+");
+    callgraph = fopen("call-graph.dot", "w");
+  }
+  void record_entry(uint32_t currentpc, uint32_t addr, VideoCoreIVRegisterFile &registers) {
+    fprintf(fd, "%08x\n", addr);
+    fflush(fd);
+    uint32_t func_start = 0;
+    for (auto it = entrypoints.begin(); it != entrypoints.end(); ++it) {
+      uint32_t maybe = *it;
+      if (currentpc > maybe) func_start = maybe;
+      else if (currentpc < maybe) break;
+    }
+    char name1[64], name2[64];
+    strncpy(name1, funcToName(func_start), 64);
+    strncpy(name2, funcToName(addr), 64);
+    printf("%s+0x%x called %s\t", name1, currentpc - func_start, name2);
+    printf("R0 = 0x%08x ", registers.getRegister(0));
+    printf("R1 = 0x%08x ", registers.getRegister(1));
+    printf("R2 = 0x%08x\n", registers.getRegister(2));
+    fprintf(callgraph, "\"0x%x\" -> \"0x%x\"\n", func_start, addr);
+    fflush(callgraph);
+  }
+private:
+  std::set<uint32_t> entrypoints;
+  FILE *fd;
+  FILE *callgraph;
+};
+
+extern Analyzer analyzer;
+
 class VideoCoreIVExecute {
 public:
 	VideoCoreIVExecute(Memory *memory,
@@ -153,27 +211,43 @@ public:
 
 	void rti() {
 		// TODO
-		throw std::runtime_error("Unsupported instruction.");
+		throw std::runtime_error("Unsupported instruction1.");
 	}
 
 	void b(unsigned int reg) {
 		registers.setRegister(VC_PC, registers.getRegister(reg));
 	}
 
-	void bl(unsigned int reg, unsigned int instSize) {
-		registers.setRegister(VC_LR, registers.getRegister(VC_PC) + instSize);
-		registers.setRegister(VC_PC, registers.getRegister(reg));
-	}
+  void bl(unsigned int reg, unsigned int instSize) {
+    uint32_t oldpc = registers.getRegister(VC_PC);
+    registers.setRegister(VC_LR, registers.getRegister(VC_PC) + instSize);
+    registers.setRegister(VC_PC, registers.getRegister(reg));
+    uint32_t newpc = registers.getRegister(reg);
+    //printf("\"0x%08lx\" -> \"0x%08lx\"\n", oldpc, newpc);
+    analyzer.record_entry(oldpc, newpc, registers);
+  }
 
-	void tbb(unsigned int reg) {
-		// TODO
-		throw std::runtime_error("Unsupported instruction.");
-	}
+  void blImm(int32_t offset, uint32_t instSize) {
+    uint32_t pc = registers.getRegister(VC_PC);
+    log->debug("vc4exec", "blImm: lr=%08x", pc + instSize);
+    registers.setRegister(VC_LR, pc + instSize);
+    registers.setRegister(VC_PC, pc + offset);
+    uint32_t newpc = registers.getRegister(VC_PC);
+    analyzer.record_entry(pc, newpc, registers);
+    //printf("\"0x%08lx\" -> \"0x%08lx\"\n", pc, newpc);
+  }
 
-	void tbh(unsigned int reg) {
-		// TODO
-		throw std::runtime_error("Unsupported instruction.");
-	}
+  void switchb(unsigned int reg) {
+    uint32_t table_addr = registers.getRegister(VC_PC) + 2;
+    uint32_t new_pc = table_addr + (memory->readByte(table_addr + registers.getRegister(reg)) * 2);
+    registers.setRegister(VC_PC, new_pc);
+  }
+
+  void switch16(unsigned int reg) {
+    uint32_t table_addr = registers.getRegister(VC_PC) + 2;
+    uint32_t new_pc = table_addr + (memory->readHalfWord(table_addr + (registers.getRegister(reg)*2)) * 2);
+    registers.setRegister(VC_PC, new_pc);
+  }
 
 	void cpuid(unsigned int reg) {
 		registers.setRegister(reg, VIDEOCORE4_CPUID);
@@ -240,13 +314,6 @@ public:
 		}
 		registers.setRegister(VC_PC, registers.getRegister(VC_PC) + offset);
 		return true;
-	}
-
-	void blImm(int32_t offset, uint32_t instSize) {
-		uint32_t pc = registers.getRegister(VC_PC);
-		log->debug("vc4exec", "blImm: lr=%08x", pc + instSize);
-		registers.setRegister(VC_LR, pc + instSize);
-		registers.setRegister(VC_PC, pc + offset);
 	}
 
 	void pushPop(bool push, bool lrpc, unsigned int start, unsigned int count) {
@@ -562,12 +629,15 @@ private:
 				// TODO: Signed?
 				registers.setRegister(rd, a < b ? a : b);
 				break;
-			case OP_ADDS2:
-				registers.setRegister(rd, a + b * 2);
-				break;
-			case OP_BCLR:
+			case OP_BCLR: // 18
 				registers.setRegister(rd, a & ~(1 << b));
 				break;
+			case OP_ADDS2: // 19
+				registers.setRegister(rd, a + b * 2);
+				break;
+                        case OP_BITFLIP: // 20
+                                registers.setRegister(rd, a ^ (1 << b));
+                                break;
 			case OP_ADDS4:
 				registers.setRegister(rd, a + b * 4);
 				break;
@@ -646,8 +716,11 @@ private:
 			case OP_SUBSCALE_8:
 				registers.setRegister(rd, a - (b << 8));
 				break;
+                        case OP_ABS: // 31
+                                registers.setRegister(rd, labs(a));
+                                break;
 			default:
-				throw std::runtime_error("Unimplemented operation.");
+				throw std::runtime_error("2Unimplemented operation.");
 		}
 		log->debug("vc4exec", "Result: %08x", registers.getRegister(rd));
 	}
@@ -692,7 +765,7 @@ private:
                                 registers.setRegister(rd, result.u);
                                 break;
                         default:
-				throw std::runtime_error("Unimplemented float operation.");
+				throw std::runtime_error("1Unimplemented float operation.");
 		}
 	}
 

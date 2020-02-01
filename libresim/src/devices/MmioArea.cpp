@@ -36,15 +36,37 @@ void MmioArea::writeWord(uintptr_t address, uint32_t value) {
 }
 uint16_t MmioArea::readHalfWord(uintptr_t address) {
 	// TODO
-	throw std::runtime_error("Unimplemented MMIO read.");
+        uint16_t value = 0x0000;
+        if (readImpl) {
+          uint32_t temp = readImpl(cbContext, address & ~1, 4);
+          if (address & 1) value = temp >> 16;
+          else value = temp & 0xffff;
+        }
+        log->info("mmio", "MMIO(R, 2, 0x%08x): 0x%08x => 0x%04x",
+                  (uint32_t)Memory::getCurrentInstr(),
+                  (uint32_t)address,
+                  value);
+        return value;
 }
 void MmioArea::writeHalfWord(uintptr_t address, uint16_t value) {
-	// TODO
-	throw std::runtime_error("Unimplemented MMIO write.");
+        uint32_t temp = readWord(address & ~1);
+
+	log->info("mmio", "MMIO(W, 2, 0x%08x): 0x%08x <= 0x%04x",
+	          (uint32_t)Memory::getCurrentInstr(),
+	          (uint32_t)address,
+	          value);
+        if (address & 1) {
+          temp = (temp & 0xffff) | (value << 16);
+        } else {
+          temp = (temp & 0xffff0000) | value;
+        }
+	if (writeImpl) {
+		writeImpl(cbContext, address, temp, 4);
+	}
 }
 uint8_t MmioArea::readByte(uintptr_t address) {
 	// TODO
-	throw std::runtime_error("Unimplemented MMIO read.");
+	throw std::runtime_error("Unimplemented MMIO read2.");
 }
 void MmioArea::writeByte(uintptr_t address, uint8_t value) {
 	// TODO

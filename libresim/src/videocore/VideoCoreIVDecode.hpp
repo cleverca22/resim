@@ -20,8 +20,9 @@ class VideoCoreIVDecode {
 public:
 	VideoCoreIVDecode(Memory *memory,
 	                  VideoCoreIVRegisterFile &registers,
+                          VectorFile &vector_file,
 	                  Log *log)
-			: memory(memory), registers(registers), log(log),
+			: memory(memory), registers(registers), vector_file(vector_file), log(log),
 			execute(memory, registers, log) {
 	}
 
@@ -29,23 +30,23 @@ public:
 		log->debug("vc4", "pc: %08x", pc());
 		Memory::setCurrentInstr(pc());
 		uint16_t inst1 = memory->readHalfWord(pc());
-		if ((inst1 & 0x8000) == 0) {
+		if ((inst1 & 0x8000) == 0) {              // 0??? ????  ???? ????
 			scalar16(inst1);
-		} else if ((inst1 & 0xc000) == 0x8000) {
+		} else if ((inst1 & 0xc000) == 0x8000) {  // 10?? ????  ???? ????
 			uint16_t inst2 = memory->readHalfWord(pc() + 2);
 			scalar32(inst1, inst2);
-		} else if ((inst1 & 0xe000) == 0xc000) {
+		} else if ((inst1 & 0xe000) == 0xc000) {  // 110? ????  ???? ????
 			uint16_t inst2 = memory->readHalfWord(pc() + 2);
 			scalar32(inst1, inst2);
-		} else if ((inst1 & 0xf000) == 0xe000) {
+		} else if ((inst1 & 0xf000) == 0xe000) {  // 1110 ????  ???? ????
 			uint16_t inst2 = memory->readHalfWord(pc() + 2);
 			uint16_t inst3 = memory->readHalfWord(pc() + 4);
 			scalar48(inst1, inst2, inst3);
-		} else if ((inst1 & 0xf800) == 0xf000) {
+		} else if ((inst1 & 0xf800) == 0xf000) {  // 1111 0???  ???? ????
 			uint16_t inst2 = memory->readHalfWord(pc() + 2);
 			uint16_t inst3 = memory->readHalfWord(pc() + 4);
 			vector48(inst1, inst2, inst3);
-		} else if ((inst1 & 0xf800) == 0xf800) {
+		} else if ((inst1 & 0xf800) == 0xf800) {  // 1111 1???  ???? ????
 			uint32_t inst2 = memory->readHalfWord(pc() + 2);
 			inst2 = (inst2 << 16) | memory->readHalfWord(pc() + 4);
 			uint32_t inst3 = memory->readHalfWord(pc() + 6);
@@ -53,7 +54,7 @@ public:
 			vector80(inst1, inst2, inst3);
 		} else {
 			log->error("vc4", "Unsupported instruction: 0x%04x", inst1);
-			throw std::runtime_error("Unsupported instruction.");
+			throw std::runtime_error("Unsupported instruction decode.");
 		}
 		log->incrementTime();
 	}
@@ -81,10 +82,10 @@ public:
 		} else if ((inst & 0xffe0) == 0x0060) {
 			execute.bl(inst & 0x1f, 2);
 			return;
-		} else if ((inst & 0xffe0) == 0x0080) {
-			execute.tbb(inst & 0x1f);
+		} else if ((inst & 0xfff0) == 0x0080) {
+			return execute.switchb(inst & 0x1f);
 		} else if ((inst & 0xffe0) == 0x00a0) {
-			execute.tbh(inst & 0x1f);
+			return execute.switch16(inst & 0x1f);
 		} else if ((inst & 0xffe0) == 0x00e0) {
 			execute.cpuid(inst & 0x1f);
 		/*} else if ((inst & 0xf800) == 0x5000) {
@@ -162,7 +163,7 @@ public:
 
 	void scalar32(uint16_t inst1, uint16_t inst2) {
 		log->debug("vc4", "scalar32: 0x%04x 0x%04x", inst1, inst2);
-		if ((inst1 & 0xf080) == 0x9000) {
+		if ((inst1 & 0xf080) == 0x9000) {                                       // 1001 ????  0??? ????
 			unsigned int cond = (inst1 >> 8) & 0xf;
 			int32_t offset = (uint32_t)inst2 | ((uint32_t)(inst1 & 0x7f) << 16);
 			offset = extendSigned(offset, 0x0400000) * 2;
@@ -171,7 +172,7 @@ public:
 			if (execute.bcc(cond, offset)) {
 				return;
 			}
-		} else if ((inst1 & 0xf080) == 0x9080) {
+		} else if ((inst1 & 0xf080) == 0x9080) {                                // 1001 ????  1??? ????
 			int32_t offset = (uint32_t)inst2 | ((uint32_t)(inst1 & 0x7f) << 16);
 			log->debug("vc4", "offset: %08x", offset);
 			offset |= (uint32_t)(inst1 & 0xf00) << 15;
@@ -211,7 +212,7 @@ public:
 			imm = extendSigned(imm, 0x20);
 			unsigned int cond = (inst2 >> 7) & 0xf;
 			execute.binaryOpImm(cond, op, rd, ra, imm);
-		} else if ((inst1 & 0xfc00) == 0xa800) {
+		} else if ((inst1 & 0xfc00) == 0xa800) {                                // 1010 10??  ???? ????
 			bool store = (inst1 & 0x20) != 0;
 			static const unsigned int BASE_REG[] = {
 				24, VC_SP, VC_PC, 0
@@ -223,7 +224,7 @@ public:
 					extendSigned(inst2, 0x8000));
 			if (!store && rd == VC_PC)
 				return;
-		} else if ((inst1 & 0xff00) == 0xa000 && (inst2 & 0x0060) == 0x0000) {
+		} else if ((inst1 & 0xff00) == 0xa000 && (inst2 & 0x0060) == 0x0000) {  // 1010 0000  ???? ????   ???? ????  ?00? ????
 			bool store = (inst1 & 0x20) != 0;
 			unsigned int format = (inst1 >> 6) & 0x3;
 			unsigned int rd = inst1 & 0x1f;
@@ -243,7 +244,7 @@ public:
 			execute.loadStoreOffset(store, format, rd, ra, extendSigned (offset, 0x20), cond);
 			if (!store && rd == VC_PC)
 				return;
-		} else if ((inst1 & 0xfe00) == 0xa200) {
+		} else if ((inst1 & 0xfe00) == 0xa200) {                                // 1010 001?  ???? ????
 			bool store = (inst1 & 0x20) != 0;
 			unsigned int rd = inst1 & 0x1f;
 			unsigned int rs = inst2 >> 11;
@@ -273,6 +274,8 @@ public:
 			unsigned int imm = inst2;
 			if (imm & 0x8000)
 				imm |= ~0xffff;
+			// possible improvement?
+                        // unsigned int imm = extendSigned(inst2, 0x8000);
 			execute.binaryOpImm(14, op, rd, rd, imm);
 		} else if ((inst1 & 0xfc00) == 0xb400) {
 			unsigned int rd = inst1 & 0x1f;
@@ -311,35 +314,50 @@ public:
 					return;
 				}
 			}
-		} else if ((inst1 & 0xffe0) == 0xc5e0 && (inst2 & 0x60) == 0x0) {
+		} else if ((inst1 & 0xff80) == 0xc480 && (inst2 & 0x20) == 0) {         // 1100 0100  1??? ????   ???? ????  ??0? ????
+			unsigned int cond = (inst2 >> 7) & 0xf;
+			unsigned int rd = inst1 & 0x1f;
+			unsigned int ra = (inst2 >> 11) & 0x1f;
+			unsigned int rb = inst2 & 0x1f;
+			bool aUnsigned = (inst1 & 0x40) != 0;
+			bool bUnsigned = (inst1 & 0x20) != 0;
+			bool immediate = (inst2 & 0x40) != 0;
+			if (immediate) {
+				// TODO
+				throw std::runtime_error("div with immediate unimplemented!");
+			} else {
+				execute.div(cond, rd, ra, rb, aUnsigned, bUnsigned);
+			}
+			// TODO
+		} else if ((inst1 & 0xffe0) == 0xc5e0 && (inst2 & 0x60) == 0x0) {       // 1100 0101  111d dddd   aaaa accc  c00b bbbb
 			unsigned int cond = (inst2 >> 7) & 0xf;
 			unsigned int rd = inst1 & 0x1f;
 			unsigned int ra = (inst2 >> 11) & 0x1f;
 			unsigned int rb = inst2 & 0x1f;
 			// TODO: ?
 			execute.addShl(cond, rd, ra, rb, 8);
-		} else if ((inst1 & 0xff80) == 0xca00 && (inst2 & 0x40) == 0x40) {
+		} else if ((inst1 & 0xff80) == 0xca00 && (inst2 & 0x40) == 0x40) {      // 1100 1010  0ood dddd   aaaa accc  c1?? ????
 			unsigned int cond = (inst2 >> 7) & 0xf;
 			unsigned int rd = inst1 & 0x1f;
 			unsigned int ra = (inst2 >> 11) & 0x1f;
 			unsigned int op = (inst1 >> 5) & 0x3;
 			int shift = extendSigned(inst2 & 0x3f, 0x20);
 			execute.floatConv(cond, (FloatConvOp)op, rd, ra, shift);
-		} else if ((inst1 & 0xfe00) == 0xc800 && (inst2 & 0x60) == 0x0) {
+		} else if ((inst1 & 0xfe00) == 0xc800 && (inst2 & 0x60) == 0x0) {       // 1100 100o  oood dddd   aaaa accc  c00b bbbb
 			unsigned int cond = (inst2 >> 7) & 0xf;
 			unsigned int rd = inst1 & 0x1f;
 			unsigned int ra = (inst2 >> 11) & 0x1f;
 			unsigned int op = (inst1 >> 5) & 0xf;
 			unsigned int rb = inst2 & 0x1f;
 			execute.floatOp(cond, (FloatOp)op, rd, ra, rb);
-		} else if ((inst1 & 0xfe00) == 0xc800 && (inst2 & 0x40) == 0x40) {
+		} else if ((inst1 & 0xfe00) == 0xc800 && (inst2 & 0x40) == 0x40) {      // 1100 100o  oood dddd   aaaa accc  c1ii iiii
 			unsigned int cond = (inst2 >> 7) & 0xf;
 			unsigned int rd = inst1 & 0x1f;
 			unsigned int ra = (inst2 >> 11) & 0x1f;
 			unsigned int op = (inst1 >> 5) & 0xf;
 			int32_t imm = extendSigned(inst2 & 0x3f, 0x40);
 			execute.floatOpImm(cond, (FloatOp)op, rd, ra, imm);
-		} else if ((inst1 & 0xff80) == 0xc400 && (inst2 & 0x60) == 0x0) {
+		} else if ((inst1 & 0xff80) == 0xc400 && (inst2 & 0x60) == 0x0) {       // 1100 0100  0ssd dddd   aaaa accc  c00b bbbb
 			unsigned int cond = (inst2 >> 7) & 0xf;
 			unsigned int rd = inst1 & 0x1f;
 			unsigned int ra = (inst2 >> 11) & 0x1f;
@@ -347,6 +365,12 @@ public:
 			bool aUnsigned = (inst1 & 0x0040) != 0;
 			bool bUnsigned = (inst1 & 0x0020) != 0;
 			execute.mulhd(cond, rd, ra, rb, aUnsigned, bUnsigned);
+                } else if ((inst1 & 0xffe0) == 0xc580 && (inst2 & 0x70) == 0x50) {    // 1100 0101  100d dddd   aaaa accc  c101 iiii
+                        unsigned int cond = (inst2 >> 7) & 0xf;
+                        unsigned int rd = inst1 & 0x1f;
+                        unsigned int ra = (inst2 >> 11) & 0x1f;
+                        uint32_t imm = 0x200 | ((inst2 & 0xf) << 5);
+                        execute.binaryOpImm(cond, OP_ADD, rd, ra, imm);
 		} else {
 			// TODO
 			throw std::runtime_error("scalar32: Unsupported instruction.");
@@ -392,6 +416,15 @@ public:
 			execute.loadStoreOffset(store, format, rd, VC_PC, offset);
 			if (!store && rd == VC_PC)
 				return;
+                } else if ((inst1 & 0xff00) == 0xe700) {
+                        bool store = (inst1 & 0x20) != 0;
+                        unsigned int format = (inst1 >> 6) & 0x3;
+                        unsigned int rd = inst1 & 0x1f;
+                        unsigned int rs = inst3 >> 11;
+                        int offset = inst3 & 0x7ff;
+                        offset = (offset << 16) | inst2;
+                        offset = extendSigned(offset, 0x4000000);
+                        execute.loadStoreOffset(store, format, rd, rs, offset);
 		} else if ((inst1 & 0xfc00) == 0xec00) {
 			unsigned int rs = (inst1 >> 5) & 0x1f;
 			unsigned int rd = inst1 & 0x1f;
@@ -415,7 +448,31 @@ public:
 
 	void vector80(uint16_t inst1, uint32_t inst2, uint32_t inst3) {
 		// TODO
-		throw std::runtime_error("vector80: Unsupported instruction.");
+                if ( (inst1 == 0xfe03) && (inst2 == 0xc0380400) && (inst3 == 0xfbc00000) ) {
+                  printf("v32mov HY(0++,0),0 REP8\n");
+                  for (int row = 0; row < 8; row++) {
+                    for (int col = 0; col < 16; col++) {
+                      vector_file.write32(row, col, 0);
+                    }
+                  }
+                } else if ( (inst1 == 0xf893) && (inst2 == 0xe0300380) && (inst3 == 0x43e00014) ) {
+                  //printf("v32st HY(0++,0),(r5+=r4) REP8\n");
+                  // write 16 uint32_t's to r5, increment r5 by r4, repeat 8 times
+                  // r5 is the destination address to start at
+                  // r4 is how much to increment r5 by, after each SIMD row
+                  // increments to r5 dont actually persist within the real r5
+                  uint32_t stride = registers.getRegister(4);
+                  uint32_t target = registers.getRegister(5);
+                  for (int row=0; row<8; row++) {
+                    uint32_t row_target = target + (row * stride);
+                    for (int col=0; col<16; col++) {
+                      memory->writeWord(row_target + (col * 4), vector_file.read32(row, col));
+                    }
+                  }
+                } else {
+                  printf("vector80 0x%04x 0x%08x 0x%08x\n", inst1, inst2, inst3);
+		  throw std::runtime_error("vector80: Unsupported instruction.");
+                }
 		registers.setRegister(VC_PC, pc() + 10);
 	}
 private:
@@ -425,6 +482,7 @@ private:
 
 	Memory *memory;
 	VideoCoreIVRegisterFile &registers;
+        VectorFile &vector_file;
 	Log *log;
 
 	VideoCoreIVExecute execute;

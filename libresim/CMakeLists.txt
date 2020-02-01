@@ -1,7 +1,7 @@
 
 if(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
 else(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
-	set(CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-unused-parameter -Woverloaded-virtual -std=c++0x")
+	set(CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-unused-parameter -Woverloaded-virtual -std=c++0x -g")
 endif(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
 
 set(SRC
@@ -36,6 +36,7 @@ set(SRC
 	src/videocore/VideoCoreIVExecute.hpp
 	src/videocore/VideoCoreIVProcessor.cpp
 	src/videocore/VideoCoreIVRegisterFile.cpp
+        src/videocore/VideoCoreIVVectorFile.cpp
 )
 
 include_directories(include)

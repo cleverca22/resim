@@ -13,6 +13,8 @@
 #include <cassert>
 #include <cstdlib>
 
+using namespace std;
+
 UartRelay::UartRelay(const std::string &address) {
 	// Resolve the address
 	struct addrinfo hints, *result;
@@ -41,9 +43,13 @@ UartRelay::UartRelay(const std::string &address) {
 		throw std::runtime_error("setsockopt failed.");
 	}
 	if (connect(sock, result->ai_addr, result->ai_addrlen) < 0) {
-		throw std::runtime_error("connect failed.");
-	}
-	freeaddrinfo(result);
+    char *msg;
+    asprintf(&msg, "connect failed for %s:%d", address.c_str(), 12365);
+    string msg2 = msg;
+    free(msg);
+    throw std::runtime_error(msg2);
+  }
+  freeaddrinfo(result);
 }
 UartRelay::~UartRelay() {
 	close(sock);
